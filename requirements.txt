@@ -1,0 +1,6 @@
+PyQt5>=5.15.0
+pynput>=1.7.6
+requests>=2.31.0
+Pillow>=10.0.0
+pyperclip>=1.8.0
+urllib3>=2.0.0

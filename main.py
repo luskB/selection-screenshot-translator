@@ -17,6 +17,7 @@ class SignalBridge(QObject):
     request_icon = Signal(int, int)
     request_image_icon = Signal()  # 图片翻译信号
     hide_icon = Signal()  # 隐藏图标信号
+    request_direct_translate = Signal(int, int)  # 划词后ALT直接翻译信号
 
 class GlobalListener:
     def __init__(self, bridge, controller):
@@ -24,21 +25,52 @@ class GlobalListener:
         self.controller = controller
         self.press_pos = None
         self.icon_showing = False
+        self.alt_pressed = False       # 实时 ALT 状态
+        self.alt_at_press = False      # 鼠标按下瞬间的 ALT 状态
+        self.last_drag_pos = None      # 上次普通划词的释放位置
+        self.last_drag_time = 0        # 上次普通划词的释放时间
+
+    def on_key_press(self, key):
+        if key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
+            self.alt_pressed = True
+            # 如果鼠标正在拖拽中途按下ALT，也算ALT+划词
+            if self.press_pos is not None:
+                self.alt_at_press = True
+
+    def on_key_release(self, key):
+        if key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
+            self.alt_pressed = False
+            # 检查是否在普通划词后 2 秒内单击了 ALT → 直接翻译
+            if self.last_drag_pos and (time.time() - self.last_drag_time) < 2:
+                pos = self.last_drag_pos
+                self.last_drag_pos = None
+                self.last_drag_time = 0
+                self.bridge.request_direct_translate.emit(int(pos[0]), int(pos[1]))
 
     def on_click(self, x, y, button, pressed):
         if button == mouse.Button.left:
             if pressed:
                 self.press_pos = (x, y)
+                self.alt_at_press = self.alt_pressed  # 记录按下时ALT状态
             else:
                 if self.press_pos:
                     dist = ((x - self.press_pos[0])**2 + (y - self.press_pos[1])**2)**0.5
-                    if dist > 30:
-                        # 划词操作
+                    if dist > 30 and self.alt_at_press:
+                        # ALT+划词 → 显示"译"图标
+                        self.last_drag_pos = None
+                        self.last_drag_time = 0
                         self.bridge.request_icon.emit(int(x), int(y))
-                    elif self.icon_showing:
-                        # 点击操作，检查是否点击在图标区域外
-                        if not self._is_click_on_icon(x, y):
-                            self.bridge.hide_icon.emit()
+                    elif dist > 30:
+                        # 普通划词 → 记录位置和时间，等待2秒内ALT触发
+                        self.last_drag_pos = (x, y)
+                        self.last_drag_time = time.time()
+                    else:
+                        # 点击（非划词），清除划词记录
+                        self.last_drag_pos = None
+                        self.last_drag_time = 0
+                        if self.icon_showing:
+                            if not self._is_click_on_icon(x, y):
+                                self.bridge.hide_icon.emit()
                 self.press_pos = None
 
     def _is_click_on_icon(self, x, y):
@@ -52,6 +84,12 @@ class GlobalListener:
         self.listener = mouse.Listener(on_click=self.on_click)
         self.listener.daemon = True
         self.listener.start()
+        
+        self.kb_listener = keyboard.Listener(
+            on_press=self.on_key_press,
+            on_release=self.on_key_release)
+        self.kb_listener.daemon = True
+        self.kb_listener.start()
 
 class AppController(QObject):
     translation_finished = Signal(str, QPoint)
@@ -77,6 +115,7 @@ class AppController(QObject):
         self.bridge.request_icon.connect(self.on_request_icon)
         self.bridge.request_image_icon.connect(self.on_image_detected)
         self.bridge.hide_icon.connect(self.hide_icon)  # 连接隐藏图标信号
+        self.bridge.request_direct_translate.connect(self.on_request_direct_translate)  # 直接翻译
         
         self.listener = GlobalListener(self.bridge, self)
         self.listener.start()
@@ -132,6 +171,27 @@ class AppController(QObject):
                 self.current_text = text
                 self.current_image = None
                 self.show_icon_with_timer()
+        except: pass
+
+    def on_request_direct_translate(self, x, y):
+        """普通划词后2秒内单击ALT → 复制选区并直接翻译，跳过'译'图标"""
+        self.last_pos = QPoint(x, y)
+        kb = keyboard.Controller()
+        kb.press(keyboard.Key.ctrl)
+        kb.press('c')
+        time.sleep(0.1)
+        kb.release('c')
+        kb.release(keyboard.Key.ctrl)
+        QTimer.singleShot(250, self.get_clipboard_and_translate)
+
+    def get_clipboard_and_translate(self):
+        """获取剪贴板文本后直接翻译，不显示'译'图标"""
+        try:
+            text = pyperclip.paste().strip()
+            if text:
+                self.current_text = text
+                self.current_image = None
+                self.do_translation()
         except: pass
 
     def show_icon_with_timer(self):

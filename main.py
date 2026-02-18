@@ -32,14 +32,14 @@ class GlobalListener:
         self.last_drag_time = 0        # 上次普通划词的释放时间
 
     def on_key_press(self, key):
-        if key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
+        if key == keyboard.Key.alt_l or key == keyboard.Key.alt_r or key == keyboard.Key.alt_gr:
             self.alt_pressed = True
             # 如果鼠标正在拖拽中途按下ALT，也算ALT+划词
             if self.press_pos is not None:
                 self.alt_at_press = True
 
     def on_key_release(self, key):
-        if key == keyboard.Key.alt_l or key == keyboard.Key.alt_r:
+        if key == keyboard.Key.alt_l or key == keyboard.Key.alt_r or key == keyboard.Key.alt_gr:
             self.alt_pressed = False
             # 检查是否在普通划词后 2 秒内单击了 ALT → 直接翻译
             if self.last_drag_pos and (time.time() - self.last_drag_time) < 2:

@@ -107,6 +107,7 @@ class ResultPopup(QWidget):
         self.current_engine = "google"
         self.source_text = ""   # 保存原文，用于切换引擎/语言时重翻
         self.is_image = False   # 标记是否为图片翻译
+        self.pinned = False     # 钉住状态：True时点击外部不隐藏
 
         self.dragging = False
         self.resizing = False
@@ -175,6 +176,15 @@ class ResultPopup(QWidget):
             "QPushButton:hover{background:rgba(255,255,255,.2);}")
         theme_btn.clicked.connect(self.toggle_theme)
 
+        # 钉住按钮
+        self.pin_btn = QPushButton("📌" if self.pinned else "📍")
+        self.pin_btn.setFixedSize(32, 32)
+        self.pin_btn.setToolTip("钉住窗口" if not self.pinned else "取消钉住")
+        self.pin_btn.setStyleSheet("QPushButton{border:none;font-size:16px;color:rgba(255,255,255,.9);"
+            "background:transparent;border-radius:16px;}"
+            "QPushButton:hover{background:rgba(255,255,255,.2);}")
+        self.pin_btn.clicked.connect(self.toggle_pin)
+
         close_btn = QPushButton("×")
         close_btn.setFixedSize(32, 32)
         close_btn.setStyleSheet("QPushButton{border:none;font-size:24px;color:rgba(255,255,255,.8);"
@@ -186,6 +196,7 @@ class ResultPopup(QWidget):
         hdr.addStretch()
         hdr.addWidget(self.engine_combo)
         hdr.addWidget(self.lang_combo)
+        hdr.addWidget(self.pin_btn)
         hdr.addWidget(theme_btn)
         hdr.addWidget(close_btn)
         root.addWidget(self.title_bar)
@@ -249,6 +260,11 @@ class ResultPopup(QWidget):
         txt = self.content.toPlainText()
         self._build()
         self.content.setText(txt)
+
+    def toggle_pin(self):
+        self.pinned = not self.pinned
+        self.pin_btn.setText("📌" if self.pinned else "📍")
+        self.pin_btn.setToolTip("取消钉住" if self.pinned else "钉住窗口")
 
     def copy_to_clipboard(self):
         QApplication.clipboard().setText(self.content.toPlainText())
@@ -354,7 +370,8 @@ class ResultPopup(QWidget):
 
     def changeEvent(self, event):
         if event.type() == QEvent.ActivationChange and not self.isActiveWindow():
-            self.hide()
+            if not self.pinned:
+                self.hide()
 
 # ================================================================
 #  设置窗口（美化版 + 多引擎 tab）

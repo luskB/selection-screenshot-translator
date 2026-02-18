@@ -1,6 +1,7 @@
 import sys
 import time
 import threading
+import ctypes
 import pyperclip
 import winreg
 from pynput import mouse, keyboard
@@ -130,7 +131,7 @@ class AppController(QObject):
         self.clipboard_timer = QTimer()
         self.clipboard_timer.timeout.connect(self.check_clipboard_image)
         self.clipboard_timer.start(500)  # 每500ms检查一次
-        self.last_clipboard_image = None
+        self.last_clipboard_seq = 0  # 剪贴板序列号（Windows API）
 
     def update_config(self, new_config):
         self.config.update(new_config)
@@ -218,25 +219,26 @@ class AppController(QObject):
             self.icon_hide_timer = None
 
     def check_clipboard_image(self):
-        """检查剪贴板是否有图片"""
+        """检查剪贴板是否有新图片（使用 Windows API，零开销检测）"""
         try:
+            # 1. 先用 GetClipboardSequenceNumber 检查剪贴板是否有变化
+            seq = ctypes.windll.user32.GetClipboardSequenceNumber()
+            if seq == self.last_clipboard_seq:
+                return  # 剪贴板未变化，直接返回，不做任何IO
+            self.last_clipboard_seq = seq
+            
+            # 2. 剪贴板变化了，用 IsClipboardFormatAvailable 检查是否含图片
+            CF_BITMAP = 2
+            if not ctypes.windll.user32.IsClipboardFormatAvailable(CF_BITMAP):
+                return  # 不是图片，直接返回
+            
+            # 3. 确认是新图片，才读取一次 pixmap
             clipboard = QApplication.clipboard()
             pixmap = clipboard.pixmap()
-            
             if not pixmap.isNull():
-                # 将 QPixmap 转换为字节数据用于比较
-                buffer = QBuffer()
-                buffer.open(QIODevice.WriteOnly)
-                pixmap.save(buffer, "PNG")
-                ba = buffer.data().data()
-                buffer.close()
-                
-                # 检查是否是新图片
-                if ba != self.last_clipboard_image:
-                    self.last_clipboard_image = ba
-                    self.current_image = pixmap
-                    self.current_text = ""
-                    self.bridge.request_image_icon.emit()
+                self.current_image = pixmap
+                self.current_text = ""
+                self.bridge.request_image_icon.emit()
         except:
             pass
     

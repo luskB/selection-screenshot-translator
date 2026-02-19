@@ -79,7 +79,7 @@ pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --name 
 ```json
 {
   "engine": "google",              // 默认翻译引擎
-  "image_engine": "tencent",       // 图片翻译引���
+  "image_engine": "tencent",       // 图片翻译引擎
   "target_lang": "zh-CN",          // 目标语言
   "theme": "dark",                 // 主题（dark/light）
   "proxy_mode": "auto",            // 代理模式（auto/manual/direct）
@@ -107,9 +107,12 @@ pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --name 
 
 ### 文本翻译
 1. 用鼠标选中任意文本
-2. 屏幕左侧会出现"译"按钮
-3. 点击按钮查看翻译结果
-4. 可在翻译窗口切换引擎和目标语言
+2. 2秒内点击ALT查看翻译结果
+3. 可在翻译窗口切换引擎和目标语言
+或
+1.在划词过程中单击ALT
+2.鼠标右下角出现“译”图标
+3.点击即可查看翻译结果和更换目标语言与翻译引擎
 
 ### 图片翻译
 1. 按下 `Print` 截图（或使用其他截图工具）

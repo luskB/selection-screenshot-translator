@@ -94,6 +94,7 @@ class FloatingIcon(QWidget):
 class ResultPopup(QWidget):
     # 引擎/语言切换时发出信号，由 main.py 的 controller 处理
     retranslate_requested = Signal(str, str)  # (engine, target_lang)
+    show_history_requested = Signal()         # 请求显示历史记录
 
     def __init__(self):
         super().__init__()
@@ -228,11 +229,25 @@ class ResultPopup(QWidget):
         barL = QHBoxLayout(bar)
         barL.setContentsMargins(0, 6, 0, 0)
 
+        retranslate_btn = QPushButton("🔄 重翻")
+        retranslate_btn.setFixedHeight(32)
+        retranslate_btn.setStyleSheet(_btn_style(dk))
+        retranslate_btn.setToolTip("使用当前引擎和语言重新翻译")
+        retranslate_btn.clicked.connect(self._on_retranslate_clicked)
+
+        history_btn = QPushButton("📜 历史")
+        history_btn.setFixedHeight(32)
+        history_btn.setStyleSheet(_btn_style(dk))
+        history_btn.setToolTip("查看翻译历史记录")
+        history_btn.clicked.connect(self.show_history_requested.emit)
+
         copy_btn = QPushButton("📋 复制")
         copy_btn.setFixedHeight(32)
         copy_btn.setStyleSheet(_btn_style(dk, accent=True))
         copy_btn.clicked.connect(self.copy_to_clipboard)
 
+        barL.addWidget(retranslate_btn)
+        barL.addWidget(history_btn)
         barL.addStretch()
         barL.addWidget(copy_btn)
         bl.addWidget(bar)
@@ -265,6 +280,12 @@ class ResultPopup(QWidget):
         self.pinned = not self.pinned
         self.pin_btn.setText("📌" if self.pinned else "📍")
         self.pin_btn.setToolTip("取消钉住" if self.pinned else "钉住窗口")
+
+    def _on_retranslate_clicked(self):
+        """点击重翻按钮时，用当前引擎和语言重新翻译"""
+        if self.source_text:
+            self.content.setText("正在重新翻译...")
+            self.retranslate_requested.emit(self.current_engine, self.target_lang)
 
     def copy_to_clipboard(self):
         QApplication.clipboard().setText(self.content.toPlainText())
@@ -409,7 +430,7 @@ class SettingsWindow(QWidget):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.setWindowTitle("OpenCodeTranslate 设置")
+        self.setWindowTitle("划词翻译设置")
         self.resize(600, 620)
         self.setStyleSheet(_SETTINGS_STYLE)
 
@@ -452,6 +473,13 @@ class SettingsWindow(QWidget):
         self.proxy_url = QLineEdit(c.get('proxy_url', 'http://127.0.0.1:7897'))
         self.proxy_url.setPlaceholderText("http://127.0.0.1:7897")
 
+        # 历史记录数量设置
+        self.history_max_combo = QComboBox()
+        self.history_max_combo.addItems(["5", "10", "20", "30", "50"])
+        current_max = str(c.get('history_max_count', 10))
+        idx = self.history_max_combo.findText(current_max)
+        self.history_max_combo.setCurrentIndex(idx if idx >= 0 else 1)
+
         icon_row = QHBoxLayout()
         self.icon_path_display = QLineEdit(c.get('custom_icon_path', ''))
         self.icon_path_display.setPlaceholderText("使用默认图标")
@@ -464,6 +492,7 @@ class SettingsWindow(QWidget):
         f.addRow("默认翻译引擎:", self.engine_combo)
         f.addRow("图片翻译引擎:", self.image_engine_combo)
         f.addRow("代理服务器地址:", self.proxy_url)
+        f.addRow("历史记录保留数量:", self.history_max_combo)
         f.addRow("自定义悬浮图标:", icon_row)
         tip = QLabel("<font color='gray'>提示：代理地址用于 manual 模式，确保端口与 Clash 等代理工具一致。<br>"
                      "各引擎的代理模式请在各自的 Tab 中设置。<br>"
@@ -599,6 +628,149 @@ class SettingsWindow(QWidget):
             "ai_model":           self.ai_model.text(),
             "ai_prompt":          self.ai_prompt.toPlainText(),
             "ai_proxy_mode":      self.ai_proxy.currentText(),
+            "history_max_count":  int(self.history_max_combo.currentText()),
         }
         self.config_saved.emit(new_config)
         self.hide()
+
+# ================================================================
+#  翻译历史记录窗口
+# ================================================================
+
+_HISTORY_STYLE = """
+    QWidget { font-size: 13px; }
+    QScrollArea { border: none; background: #f8f9fa; }
+    QPushButton#clear_btn {
+        background: #e74c3c; color: white; border: none;
+        border-radius: 6px; padding: 6px 16px; font-size: 13px;
+    }
+    QPushButton#clear_btn:hover { background: #c0392b; }
+"""
+
+class HistoryWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("翻译历史记录")
+        self.resize(620, 500)
+        self.setStyleSheet(_HISTORY_STYLE)
+
+        self.root_layout = QVBoxLayout(self)
+        self.root_layout.setContentsMargins(12, 12, 12, 12)
+        self.root_layout.setSpacing(8)
+
+        # 顶部操作栏
+        top_bar = QHBoxLayout()
+        self.title_label = QLabel("翻译历史记录")
+        self.title_label.setStyleSheet("font-size:16px; font-weight:bold; color:#333;")
+        self.count_label = QLabel("")
+        self.count_label.setStyleSheet("color: gray; font-size: 12px;")
+        clear_btn = QPushButton("清空历史")
+        clear_btn.setObjectName("clear_btn")
+        clear_btn.clicked.connect(self._clear_history)
+        top_bar.addWidget(self.title_label)
+        top_bar.addWidget(self.count_label)
+        top_bar.addStretch()
+        top_bar.addWidget(clear_btn)
+        self.root_layout.addLayout(top_bar)
+
+        # 滚动区域
+        from PyQt5.QtWidgets import QScrollArea
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(8)
+        self.scroll_layout.addStretch()
+        self.scroll.setWidget(self.scroll_content)
+        self.root_layout.addWidget(self.scroll)
+
+    def load_and_display(self, history):
+        """加载并显示历史记录列表"""
+        # 清空旧的卡片
+        while self.scroll_layout.count() > 0:
+            item = self.scroll_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        self.count_label.setText(f"共 {len(history)} 条")
+
+        if not history:
+            empty = QLabel("暂无翻译历史记录")
+            empty.setAlignment(Qt.AlignCenter)
+            empty.setStyleSheet("color: #999; font-size: 14px; padding: 40px;")
+            self.scroll_layout.addWidget(empty)
+            self.scroll_layout.addStretch()
+            return
+
+        for record in history:
+            card = self._make_card(record)
+            self.scroll_layout.addWidget(card)
+
+        self.scroll_layout.addStretch()
+
+    def _make_card(self, record):
+        """为单条历史记录创建卡片 widget"""
+        card = QWidget()
+        card.setStyleSheet("""
+            QWidget#card {
+                background: white; border: 1px solid #e0e0e0;
+                border-radius: 10px;
+            }
+            QWidget#card:hover { border-color: #667eea; }
+        """)
+        card.setObjectName("card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(4)
+
+        # 时间 + 引擎 + 语言
+        engine_name = ENGINE_NAMES.get(record.get("engine", ""), record.get("engine", ""))
+        lang = "中文" if record.get("target_lang") == "zh-CN" else "English"
+        meta = QLabel(f"{record.get('time', '')}    {engine_name}  →  {lang}")
+        meta.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addWidget(meta)
+
+        # 原文
+        source = record.get("source", "")
+        if source and source != "[图片翻译]":
+            src_label = QLabel(f"原文: {source[:120]}{'...' if len(source) > 120 else ''}")
+            src_label.setWordWrap(True)
+            src_label.setStyleSheet("color: #555; font-size: 12px;")
+            layout.addWidget(src_label)
+        elif source == "[图片翻译]":
+            src_label = QLabel("原文: [图片翻译]")
+            src_label.setStyleSheet("color: #888; font-size: 12px; font-style: italic;")
+            layout.addWidget(src_label)
+
+        # 译文
+        result = record.get("result", "")
+        res_label = QLabel(f"译文: {result[:200]}{'...' if len(result) > 200 else ''}")
+        res_label.setWordWrap(True)
+        res_label.setStyleSheet("color: #2c3e50; font-size: 13px;")
+        layout.addWidget(res_label)
+
+        # 复制按钮
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        copy_btn = QPushButton("复制译文")
+        copy_btn.setFixedHeight(26)
+        copy_btn.setStyleSheet("""
+            QPushButton {
+                background: #667eea; color: white; border: none;
+                border-radius: 5px; padding: 2px 12px; font-size: 12px;
+            }
+            QPushButton:hover { background: #5568d3; }
+        """)
+        copy_btn.clicked.connect(lambda checked, txt=result: QApplication.clipboard().setText(txt))
+        btn_row.addWidget(copy_btn)
+        layout.addLayout(btn_row)
+
+        return card
+
+    def _clear_history(self):
+        """清空所有历史记录"""
+        from config_manager import save_history
+        save_history([])
+        self.load_and_display([])

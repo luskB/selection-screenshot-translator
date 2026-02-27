@@ -10,9 +10,9 @@ from PyQt5.QtCore import QPoint, pyqtSignal as Signal, QObject, QTimer, Qt, QBuf
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 
-from config_manager import load_config, save_config
+from config_manager import load_config, save_config, add_history_record, load_history
 from translator_engines import Translator
-from ui_components import FloatingIcon, ResultPopup, SettingsWindow
+from ui_components import FloatingIcon, ResultPopup, SettingsWindow, HistoryWindow
 
 class SignalBridge(QObject):
     request_icon = Signal(int, int)
@@ -104,6 +104,7 @@ class AppController(QObject):
         self.icon = FloatingIcon(self.config.get('custom_icon_path', ''))
         self.popup = ResultPopup()
         self.settings = SettingsWindow(self.config)
+        self.history_window = HistoryWindow()
         
         self.settings.config_saved.connect(self.update_config)
         self.translation_finished.connect(self.show_result)
@@ -111,6 +112,9 @@ class AppController(QObject):
         # 连接重翻信号
         self.popup.retranslate_requested.connect(self.do_retranslation)
         self.retranslation_finished.connect(self.popup.update_result)
+        
+        # 连接历史记录信号
+        self.popup.show_history_requested.connect(self.show_history)
         
         self.bridge = SignalBridge()
         self.bridge.request_icon.connect(self.on_request_icon)
@@ -293,9 +297,22 @@ class AppController(QObject):
         if self.current_image and not self.current_image.isNull():
             engine = self.config.get("image_engine", "tencent")
             self.popup.display_with_source(text, pos, "[图片翻译]", engine=engine, is_image=True)
+            # 保存历史记录
+            max_count = self.config.get("history_max_count", 10)
+            add_history_record("[图片翻译]", text, engine, self.popup.get_target_lang(), is_image=True, max_count=max_count)
         else:
             engine = self.config.get("engine", "google")
             self.popup.display_with_source(text, pos, self.current_text, engine=engine, is_image=False)
+            # 保存历史记录
+            max_count = self.config.get("history_max_count", 10)
+            add_history_record(self.current_text, text, engine, self.popup.get_target_lang(), is_image=False, max_count=max_count)
+
+    def show_history(self):
+        """显示翻译历史记录窗口"""
+        history = load_history()
+        self.history_window.load_and_display(history)
+        self.history_window.show()
+        self.history_window.activateWindow()
 
     def do_retranslation(self, engine, target_lang):
         """弹窗中切换引擎/语言时触发的重翻"""
@@ -379,6 +396,7 @@ if __name__ == "__main__":
     tray = QSystemTrayIcon(tray_icon)
     menu = QMenu()
     menu.addAction("设置 (Settings)", controller.settings.show)
+    menu.addAction("历史记录 (History)", controller.show_history)
     menu.addSeparator()
     menu.addAction("退出 (Exit)", app.quit)
     tray.setContextMenu(menu)

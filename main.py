@@ -129,6 +129,7 @@ class AppController(QObject):
         self.current_text = ""
         self.current_image = None  # 保存当前图片
         self.last_pos = QPoint(0,0)
+        self._translate_id = 0  # 翻译请求ID，用于取消过期的翻译响应
         self.icon_hide_timer = None  # 图标自动隐藏定时器
         
         # 启动剪贴板监控
@@ -257,23 +258,25 @@ class AppController(QObject):
 
     def do_translation(self):
         self.hide_icon()  # 使用统一的隐藏方法
+        self._translate_id += 1  # 生成新的翻译请求ID，使旧请求失效
+        tid = self._translate_id
         self.popup.display("正在请求接口...", self.last_pos)
         
         # 判断是文本翻译还是图片翻译
         if self.current_image and not self.current_image.isNull():
             # 图片翻译
             engine = self.config.get("image_engine", "tencent")
-            t = threading.Thread(target=self._async_run_image, args=(self.current_image, self.last_pos, engine))
+            t = threading.Thread(target=self._async_run_image, args=(self.current_image, self.last_pos, engine, tid))
             t.daemon = True
             t.start()
         else:
             # 文本翻译
             engine = self.config.get("engine", "google")
-            t = threading.Thread(target=self._async_run, args=(self.current_text, self.last_pos, engine))
+            t = threading.Thread(target=self._async_run, args=(self.current_text, self.last_pos, engine, tid))
             t.daemon = True
             t.start()
 
-    def _async_run_image(self, pixmap, pos, engine):
+    def _async_run_image(self, pixmap, pos, engine, tid):
         """异步执行图片翻译"""
         target_lang = self.popup.get_target_lang()
         
@@ -285,12 +288,14 @@ class AppController(QObject):
         buffer.close()
         
         result = self.translator.translate_image(image_bytes, target_lang, engine=engine)
-        self.translation_finished.emit(result, pos)
+        if self._translate_id == tid:  # 仅当请求未被取消时才更新结果
+            self.translation_finished.emit(result, pos)
 
-    def _async_run(self, text, pos, engine):
+    def _async_run(self, text, pos, engine, tid):
         target_lang = self.popup.get_target_lang()
         result = self.translator.translate(text, target_lang, engine=engine)
-        self.translation_finished.emit(result, pos)
+        if self._translate_id == tid:  # 仅当请求未被取消时才更新结果
+            self.translation_finished.emit(result, pos)
 
     def show_result(self, text, pos):
         # 判断是文本翻译还是图片翻译
@@ -316,10 +321,12 @@ class AppController(QObject):
 
     def do_retranslation(self, engine, target_lang):
         """弹窗中切换引擎/语言时触发的重翻"""
+        self._translate_id += 1  # 生成新的翻译请求ID，使旧请求失效
+        tid = self._translate_id
         # 使用 popup.is_image 标记来判断当前是文本翻译还是图片翻译
         if self.popup.is_image and self.current_image and not self.current_image.isNull():
             # 图片重翻
-            t = threading.Thread(target=self._async_retranslate_image, args=(self.current_image, engine, target_lang))
+            t = threading.Thread(target=self._async_retranslate_image, args=(self.current_image, engine, target_lang, tid))
             t.daemon = True
             t.start()
         else:
@@ -327,15 +334,16 @@ class AppController(QObject):
             source = self.popup.source_text
             if not source or source == "[图片翻译]":
                 return
-            t = threading.Thread(target=self._async_retranslate, args=(source, engine, target_lang))
+            t = threading.Thread(target=self._async_retranslate, args=(source, engine, target_lang, tid))
             t.daemon = True
             t.start()
 
-    def _async_retranslate(self, text, engine, target_lang):
+    def _async_retranslate(self, text, engine, target_lang, tid):
         result = self.translator.translate(text, target_lang, engine=engine)
-        self.retranslation_finished.emit(result)
+        if self._translate_id == tid:  # 仅当请求未被取消时才更新结果
+            self.retranslation_finished.emit(result)
     
-    def _async_retranslate_image(self, pixmap, engine, target_lang):
+    def _async_retranslate_image(self, pixmap, engine, target_lang, tid):
         """异步执行图片重翻"""
         # 将 QPixmap 转换为字节流
         buffer = QBuffer()
@@ -345,10 +353,12 @@ class AppController(QObject):
         buffer.close()
         
         result = self.translator.translate_image(image_bytes, target_lang, engine=engine)
-        self.retranslation_finished.emit(result)
+        if self._translate_id == tid:  # 仅当请求未被取消时才更新结果
+            self.retranslation_finished.emit(result)
 
 if __name__ == "__main__":
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     

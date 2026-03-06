@@ -17,6 +17,29 @@ ENGINE_NAMES = {
 }
 ENGINE_KEYS = list(ENGINE_NAMES.keys())
 
+# ── DPI 自适应缩放 ──
+_dpi_scale_cache = None
+
+def _get_dpi_scale():
+    """获取屏幕 DPI 缩放比例（基准 96 DPI）"""
+    global _dpi_scale_cache
+    if _dpi_scale_cache is not None:
+        return _dpi_scale_cache
+    try:
+        screen = QApplication.primaryScreen()
+        if screen:
+            logical_dpi = screen.logicalDotsPerInch()
+            _dpi_scale_cache = max(1.0, logical_dpi / 96.0)
+            return _dpi_scale_cache
+    except:
+        pass
+    _dpi_scale_cache = 1.0
+    return 1.0
+
+def sp(base_px):
+    """根据屏幕 DPI 缩放像素值，确保不同分辨率下字体大小一致"""
+    return max(1, round(base_px * _get_dpi_scale()))
+
 # ── 通用样式片段 ──
 def _combo_style_header():
     return """
@@ -26,7 +49,7 @@ def _combo_style_header():
             color: white;
             padding: 4px 10px;
             border-radius: 8px;
-            font-size: 12px;
+            font-size: %dpx;
         }
         QComboBox:hover { background: rgba(255,255,255,0.3); }
         QComboBox::drop-down { border: none; }
@@ -35,7 +58,7 @@ def _combo_style_header():
             selection-background-color: #667eea;
             selection-color: white;
         }
-    """
+    """ % sp(12)
 
 def _btn_style(dark, accent=False):
     if accent:
@@ -50,7 +73,7 @@ def _btn_style(dark, accent=False):
         QPushButton {{
             background: {bg}; color: {fg};
             border: none; border-radius: 8px;
-            padding: 5px 14px; font-size: 13px;
+            padding: 5px 14px; font-size: {sp(13)}px;
         }}
         QPushButton:hover {{ background: {bgh}; }}
     """
@@ -81,8 +104,8 @@ class FloatingIcon(QWidget):
             self.button.setText("译")
             self.button.setStyleSheet("""
                 QPushButton{background-color:#0078D4;color:white;border-radius:20px;
-                    font-weight:bold;font-size:16px;border:2px solid #fff;}
-                QPushButton:hover{background-color:#2b88d8;}""")
+                    font-weight:bold;font-size:%dpx;border:2px solid #fff;}
+                QPushButton:hover{background-color:#2b88d8;}""" % sp(16))
 
     def show_at(self, pos):
         self.move(pos + QPoint(15, 15))
@@ -152,7 +175,7 @@ class ResultPopup(QWidget):
         hdr.setContentsMargins(18, 0, 8, 0)
 
         title = QLabel("✦ 智能翻译")
-        title.setStyleSheet("font-weight:600;color:#fff;font-size:15px;border:none;background:transparent;")
+        title.setStyleSheet(f"font-weight:600;color:#fff;font-size:{sp(15)}px;border:none;background:transparent;")
 
         # 引擎切换下拉框
         self.engine_combo = QComboBox()
@@ -172,7 +195,7 @@ class ResultPopup(QWidget):
 
         theme_btn = QPushButton("🌙" if not dk else "☀️")
         theme_btn.setFixedSize(32, 32)
-        theme_btn.setStyleSheet("QPushButton{border:none;font-size:18px;color:rgba(255,255,255,.9);"
+        theme_btn.setStyleSheet(f"QPushButton{{border:none;font-size:{sp(18)}px;color:rgba(255,255,255,.9);"
             "background:transparent;border-radius:16px;}"
             "QPushButton:hover{background:rgba(255,255,255,.2);}")
         theme_btn.clicked.connect(self.toggle_theme)
@@ -181,14 +204,14 @@ class ResultPopup(QWidget):
         self.pin_btn = QPushButton("📌" if self.pinned else "📍")
         self.pin_btn.setFixedSize(32, 32)
         self.pin_btn.setToolTip("钉住窗口" if not self.pinned else "取消钉住")
-        self.pin_btn.setStyleSheet("QPushButton{border:none;font-size:16px;color:rgba(255,255,255,.9);"
+        self.pin_btn.setStyleSheet(f"QPushButton{{border:none;font-size:{sp(16)}px;color:rgba(255,255,255,.9);"
             "background:transparent;border-radius:16px;}"
             "QPushButton:hover{background:rgba(255,255,255,.2);}")
         self.pin_btn.clicked.connect(self.toggle_pin)
 
         close_btn = QPushButton("×")
         close_btn.setFixedSize(32, 32)
-        close_btn.setStyleSheet("QPushButton{border:none;font-size:24px;color:rgba(255,255,255,.8);"
+        close_btn.setStyleSheet(f"QPushButton{{border:none;font-size:{sp(24)}px;color:rgba(255,255,255,.8);"
             "background:transparent;border-radius:16px;}"
             "QPushButton:hover{color:#fff;background:rgba(255,255,255,.2);}")
         close_btn.clicked.connect(self.hide)
@@ -215,7 +238,7 @@ class ResultPopup(QWidget):
         sb_h  = "#606060" if dk else "#c0c0c0"
         sb_hh = "#707070" if dk else "#a0a0a0"
         self.content.setStyleSheet(f"""
-            QTextEdit{{border:none;background:{bg2};font-size:14px;
+            QTextEdit{{border:none;background:{bg2};font-size:{sp(14)}px;
                 padding:15px;padding-right:5px;color:{fg2};border-radius:12px;}}
             QScrollBar:vertical{{border:none;background:transparent;width:8px;margin:2px 2px 2px 0;}}
             QScrollBar::handle:vertical{{background:{sb_h};border-radius:4px;min-height:20px;}}
@@ -398,26 +421,28 @@ class ResultPopup(QWidget):
 #  设置窗口（美化版 + 多引擎 tab）
 # ================================================================
 
-_SETTINGS_STYLE = """
-    QWidget { font-size: 13px; }
-    QTabWidget::pane { border: 1px solid #ddd; border-radius: 8px; background: #fff; }
-    QTabBar::tab { padding: 8px 18px; margin-right: 2px; border-top-left-radius: 6px;
-        border-top-right-radius: 6px; background: #eee; }
-    QTabBar::tab:selected { background: #fff; border-bottom: 2px solid #667eea; font-weight: bold; }
-    QLineEdit, QComboBox { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; }
-    QLineEdit:focus, QComboBox:focus { border-color: #667eea; }
-    QTextEdit { border: 1px solid #ccc; border-radius: 6px; }
-    QTextEdit:focus { border-color: #667eea; }
-    QGroupBox { font-weight: bold; border: 1px solid #ddd; border-radius: 8px;
-        margin-top: 12px; padding-top: 18px; }
-    QGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 6px; }
-    QCheckBox { spacing: 8px; }
+def _settings_style():
+    fs = sp(13)
+    return f"""
+    QWidget {{ font-size: {fs}px; }}
+    QTabWidget::pane {{ border: 1px solid #ddd; border-radius: 8px; background: #fff; }}
+    QTabBar::tab {{ padding: 8px 18px; margin-right: 2px; border-top-left-radius: 6px;
+        border-top-right-radius: 6px; background: #eee; }}
+    QTabBar::tab:selected {{ background: #fff; border-bottom: 2px solid #667eea; font-weight: bold; }}
+    QLineEdit, QComboBox {{ padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; }}
+    QLineEdit:focus, QComboBox:focus {{ border-color: #667eea; }}
+    QTextEdit {{ border: 1px solid #ccc; border-radius: 6px; }}
+    QTextEdit:focus {{ border-color: #667eea; }}
+    QGroupBox {{ font-weight: bold; border: 1px solid #ddd; border-radius: 8px;
+        margin-top: 12px; padding-top: 18px; }}
+    QGroupBox::title {{ subcontrol-origin: margin; left: 14px; padding: 0 6px; }}
+    QCheckBox {{ spacing: 8px; }}
 """
 
 def _save_btn_style():
-    return """QPushButton{height:42px;background:#667eea;color:white;font-size:15px;
+    return """QPushButton{height:42px;background:#667eea;color:white;font-size:%dpx;
         font-weight:bold;border:none;border-radius:8px;}
-        QPushButton:hover{background:#5568d3;}"""
+        QPushButton:hover{background:#5568d3;}""" % sp(15)
 
 def _proxy_combo():
     c = QComboBox()
@@ -432,7 +457,7 @@ class SettingsWindow(QWidget):
         self.config = config
         self.setWindowTitle("划词翻译设置")
         self.resize(600, 620)
-        self.setStyleSheet(_SETTINGS_STYLE)
+        self.setStyleSheet(_settings_style())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -637,14 +662,16 @@ class SettingsWindow(QWidget):
 #  翻译历史记录窗口
 # ================================================================
 
-_HISTORY_STYLE = """
-    QWidget { font-size: 13px; }
-    QScrollArea { border: none; background: #f8f9fa; }
-    QPushButton#clear_btn {
+def _history_style():
+    fs = sp(13)
+    return f"""
+    QWidget {{ font-size: {fs}px; }}
+    QScrollArea {{ border: none; background: #f8f9fa; }}
+    QPushButton#clear_btn {{
         background: #e74c3c; color: white; border: none;
-        border-radius: 6px; padding: 6px 16px; font-size: 13px;
-    }
-    QPushButton#clear_btn:hover { background: #c0392b; }
+        border-radius: 6px; padding: 6px 16px; font-size: {fs}px;
+    }}
+    QPushButton#clear_btn:hover {{ background: #c0392b; }}
 """
 
 class HistoryWindow(QWidget):
@@ -652,7 +679,7 @@ class HistoryWindow(QWidget):
         super().__init__()
         self.setWindowTitle("翻译历史记录")
         self.resize(620, 500)
-        self.setStyleSheet(_HISTORY_STYLE)
+        self.setStyleSheet(_history_style())
 
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(12, 12, 12, 12)
@@ -661,9 +688,9 @@ class HistoryWindow(QWidget):
         # 顶部操作栏
         top_bar = QHBoxLayout()
         self.title_label = QLabel("翻译历史记录")
-        self.title_label.setStyleSheet("font-size:16px; font-weight:bold; color:#333;")
+        self.title_label.setStyleSheet(f"font-size:{sp(16)}px; font-weight:bold; color:#333;")
         self.count_label = QLabel("")
-        self.count_label.setStyleSheet("color: gray; font-size: 12px;")
+        self.count_label.setStyleSheet(f"color: gray; font-size: {sp(12)}px;")
         clear_btn = QPushButton("清空历史")
         clear_btn.setObjectName("clear_btn")
         clear_btn.clicked.connect(self._clear_history)
@@ -699,7 +726,7 @@ class HistoryWindow(QWidget):
         if not history:
             empty = QLabel("暂无翻译历史记录")
             empty.setAlignment(Qt.AlignCenter)
-            empty.setStyleSheet("color: #999; font-size: 14px; padding: 40px;")
+            empty.setStyleSheet(f"color: #999; font-size: {sp(14)}px; padding: 40px;")
             self.scroll_layout.addWidget(empty)
             self.scroll_layout.addStretch()
             return
@@ -729,7 +756,7 @@ class HistoryWindow(QWidget):
         engine_name = ENGINE_NAMES.get(record.get("engine", ""), record.get("engine", ""))
         lang = "中文" if record.get("target_lang") == "zh-CN" else "English"
         meta = QLabel(f"{record.get('time', '')}    {engine_name}  →  {lang}")
-        meta.setStyleSheet("color: #888; font-size: 11px;")
+        meta.setStyleSheet(f"color: #888; font-size: {sp(11)}px;")
         layout.addWidget(meta)
 
         # 原文
@@ -737,18 +764,18 @@ class HistoryWindow(QWidget):
         if source and source != "[图片翻译]":
             src_label = QLabel(f"原文: {source[:120]}{'...' if len(source) > 120 else ''}")
             src_label.setWordWrap(True)
-            src_label.setStyleSheet("color: #555; font-size: 12px;")
+            src_label.setStyleSheet(f"color: #555; font-size: {sp(12)}px;")
             layout.addWidget(src_label)
         elif source == "[图片翻译]":
             src_label = QLabel("原文: [图片翻译]")
-            src_label.setStyleSheet("color: #888; font-size: 12px; font-style: italic;")
+            src_label.setStyleSheet(f"color: #888; font-size: {sp(12)}px; font-style: italic;")
             layout.addWidget(src_label)
 
         # 译文
         result = record.get("result", "")
         res_label = QLabel(f"译文: {result[:200]}{'...' if len(result) > 200 else ''}")
         res_label.setWordWrap(True)
-        res_label.setStyleSheet("color: #2c3e50; font-size: 13px;")
+        res_label.setStyleSheet(f"color: #2c3e50; font-size: {sp(13)}px;")
         layout.addWidget(res_label)
 
         # 复制按钮
@@ -759,10 +786,10 @@ class HistoryWindow(QWidget):
         copy_btn.setStyleSheet("""
             QPushButton {
                 background: #667eea; color: white; border: none;
-                border-radius: 5px; padding: 2px 12px; font-size: 12px;
+                border-radius: 5px; padding: 2px 12px; font-size: %dpx;
             }
             QPushButton:hover { background: #5568d3; }
-        """)
+        """ % sp(12))
         copy_btn.clicked.connect(lambda checked, txt=result: QApplication.clipboard().setText(txt))
         btn_row.addWidget(copy_btn)
         layout.addLayout(btn_row)
